@@ -1,0 +1,30 @@
+{
+  "name": "gothic-md",
+  "version": "2.0.0",
+  "description": "GOTHIC-MD — WhatsApp Multi-Device Bot developed by KINGSLEY-XMD TECH",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.9",
+    "axios": "^1.7.9",
+    "chalk": "^4.1.2",
+    "dotenv": "^16.4.7",
+    "mathjs": "^13.2.3",
+    "moment-timezone": "^0.5.46",
+    "pino": "^9.5.0",
+    "qrcode": "^1.5.4",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "author": "KINGSLEY-XMD TECH",
+  "license": "MIT"
+}
