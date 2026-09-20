@@ -12,16 +12,17 @@
  *  GOTHIC-MD  •  WhatsApp Multi-Device Bot
  *  Developed by KINGSLEY-XMD TECH
  *
- *  🔑  Get your Session ID from the GOTHIC MD SITE and paste it
- *      into settings.js (or the SESSION_ID env var on Render).
+ *  🔑  Get your Session ID from the GOTHIC MD SITE and paste it into
+ *      settings.js (SESSION_ID field) — or set the SESSION_ID env var.
  * ─────────────────────────────────────────────────────────────
  */
 
-const fs      = require('fs');
-const path    = require('path');
-const http    = require('http');
-const P       = require('pino');
-const chalk   = require('chalk');
+const fs    = require('fs');
+const path  = require('path');
+const http  = require('http');
+const P     = require('pino');
+const chalk = require('chalk');
+
 const {
     default: makeWASocket,
     useMultiFileAuthState,
@@ -29,136 +30,110 @@ const {
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
     jidNormalizedUser,
+    Browsers,
 } = require('@whiskeysockets/baileys');
 
 const settings = require('./settings');
 const { commands, antilinkGroups } = require('./commands');
 
 /* ═══════════════════════════════════════════════════════════
- *  PORT / HTTP KEEP-ALIVE SERVER
+ *  CONSTANTS
  * ═══════════════════════════════════════════════════════════ */
 
-const PORT        = process.env.PORT || 3000;
-const SESSION_DIR = path.join(__dirname, 'session');
 const logger      = P({ level: 'silent' });
-const startTime   = Date.now();
+const SESSION_DIR = path.join(__dirname, 'session');
+const PORT        = process.env.PORT || 3000;
+const START_TIME  = Date.now();
 
-let botStatus = {
-    connected: false,
-    user:      null,
-    startedAt: new Date().toISOString(),
-};
+let prefix = settings.PREFIX;
+let sock   = null;
+let botNumber = 'unknown';
 
 /* ═══════════════════════════════════════════════════════════
- *  LOGO / BANNERS
+ *  CONSOLE LOGO
  * ═══════════════════════════════════════════════════════════ */
 
-const GOTHIC_LOGO = `
-\x1b[35m
-   ██████╗  ██████╗ ████████╗██╗  ██╗██╗ ██████╗    ███╗   ███╗██████╗
-  ██╔════╝ ██╔═══██╗╚══██╔══╝██║  ██║██║██╔════╝    ████╗ ████║██╔══██╗
-  ██║  ███╗██║   ██║   ██║   ███████║██║██║         ██╔████╔██║██║  ██║
-  ██║   ██║██║   ██║   ██║   ██╔══██║██║██║         ██║╚██╔╝██║██║  ██║
-  ╚██████╔╝╚██████╔╝   ██║   ██║  ██║██║╚██████╗    ██║ ╚═╝ ██║██████╔╝
-   ╚═════╝  ╚═════╝    ╚═╝   ╚═╝  ╚═╝╚═╝ ╚═════╝    ╚═╝     ╚═╝╚═════╝
-\x1b[0m
-\x1b[36m         🎭  GOTHIC-MD  •  Developed by KINGSLEY-XMD TECH  ⚡\x1b[0m
-\x1b[90m  ────────────────────────────────────────────────────────────────\x1b[0m
-`;
+function printLogo() {
+    const g1 = chalk.hex('#8A2BE2');
+    const g2 = chalk.hex('#00FFFF');
+    const g3 = chalk.hex('#FF00FF');
+    const g4 = chalk.hex('#00FF88');
 
-const CONNECTED_LOGO = `
-\x1b[32m
-  ╔══════════════════════════════════════════════════════════════╗
-  ║                                                              ║
-  ║      ✅   C O N N E C T E D   T O   W H A T S A P P   ✅     ║
-  ║                                                              ║
-  ║              🎭  GOTHIC-MD  •  IS NOW ONLINE  ⚡             ║
-  ║                                                              ║
-  ╚══════════════════════════════════════════════════════════════╝
-\x1b[0m
-`;
-
-function printStartupBanner() {
-    console.clear();
-    console.log(GOTHIC_LOGO);
-    console.log(chalk.cyan(`   🔧 Node.js   : `) + chalk.white(process.version));
-    console.log(chalk.cyan(`   📡 Port      : `) + chalk.white(PORT));
-    console.log(chalk.cyan(`   📦 Version   : `) + chalk.white(`${settings.BOT_NAME} v${settings.BOT_VERSION}`));
-    console.log(chalk.cyan(`   👑 Owner     : `) + chalk.white(settings.OWNER_NAME));
-    console.log(chalk.cyan(`   🔐 Session   : `) + chalk.white(settings.SESSION_ID ? '✅ Loaded' : '❌ Missing'));
-    console.log(chalk.gray('   ────────────────────────────────────────────────────────────────\n'));
-}
-
-function printConnectedBanner(user) {
-    console.log(CONNECTED_LOGO);
-    console.log(chalk.green(`   📞 Number    : `) + chalk.white('+' + (user?.id?.split(':')[0].split('@')[0] || 'unknown')));
-    console.log(chalk.green(`   👤 Name      : `) + chalk.white(user?.name || settings.BOT_NAME));
-    console.log(chalk.green(`   🕒 Time      : `) + chalk.white(new Date().toLocaleString()));
-    console.log(chalk.green(`   🌐 Port      : `) + chalk.white(PORT));
-    console.log(chalk.gray('\n   ────────────────────────────────────────────────────────────────'));
-    console.log(chalk.yellow(`   💡 Send `) + chalk.bold.white(`${settings.PREFIX}menu`) + chalk.yellow(` to your bot on WhatsApp.`));
-    console.log(chalk.gray('   ────────────────────────────────────────────────────────────────\n'));
+    console.log('');
+    console.log(g1('  ╔══════════════════════════════════════════════════════╗'));
+    console.log(g1('  ║') + g2('        ██████╗  ██████╗ ████████╗██╗  ██╗██╗ ██████╗ ') + g1('║'));
+    console.log(g1('  ║') + g2('       ██╔════╝ ██╔═══██╗╚══██╔══╝██║  ██║██║██╔════╝ ') + g1('║'));
+    console.log(g1('  ║') + g3('       ██║  ███╗██║   ██║   ██║   ███████║██║██║      ') + g1('║'));
+    console.log(g1('  ║') + g3('       ██║   ██║██║   ██║   ██║   ██╔══██║██║██║      ') + g1('║'));
+    console.log(g1('  ║') + g4('       ╚██████╔╝╚██████╔╝   ██║   ██║  ██║██║╚██████╗ ') + g1('║'));
+    console.log(g1('  ║') + g4('        ╚═════╝  ╚═════╝    ╚═╝   ╚═╝  ╚═╝╚═╝ ╚═════╝ ') + g1('║'));
+    console.log(g1('  ╠══════════════════════════════════════════════════════╣'));
+    console.log(g1('  ║') + chalk.bold.yellow('          🎭  GOTHIC-MD  •  KINGSLEY-XMD TECH  ⚡        ') + g1('║'));
+    console.log(g1('  ╠══════════════════════════════════════════════════════╣'));
+    console.log(g1('  ║') + chalk.white(`          Version : ${settings.BOT_VERSION.padEnd(34)}`) + g1('║'));
+    console.log(g1('  ║') + chalk.white(`          Owner   : ${settings.OWNER_NAME.padEnd(34)}`) + g1('║'));
+    console.log(g1('  ║') + chalk.white(`          Node    : ${process.version.padEnd(34)}`) + g1('║'));
+    console.log(g1('  ║') + chalk.white(`          Port    : ${String(PORT).padEnd(34)}`) + g1('║'));
+    console.log(g1('  ╚══════════════════════════════════════════════════════╝'));
+    console.log('');
 }
 
 /* ═══════════════════════════════════════════════════════════
- *  HTTP SERVER  (keeps the Render Web Service alive)
+ *  KEEP-ALIVE HTTP SERVER (for Render / Koyeb / Heroku)
  * ═══════════════════════════════════════════════════════════ */
 
-function startHttpServer() {
+function startKeepAliveServer() {
     const server = http.createServer((req, res) => {
-        if (req.url === '/health' || req.url === '/') {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify({
-                status   : botStatus.connected ? 'online' : 'connecting',
-                bot      : settings.BOT_NAME,
-                version  : settings.BOT_VERSION,
-                developer: settings.OWNER_NAME,
-                uptime   : Math.floor((Date.now() - startTime) / 1000) + 's',
-                user     : botStatus.user,
-                port     : PORT,
-            }, null, 2));
-        }
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('GOTHIC-MD • KINGSLEY-XMD TECH');
+        const up = Math.floor((Date.now() - START_TIME) / 1000);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            status   : 'online',
+            bot      : settings.BOT_NAME,
+            version  : settings.BOT_VERSION,
+            developer: settings.OWNER_NAME,
+            number   : botNumber,
+            uptime   : `${Math.floor(up / 3600)}h ${Math.floor((up % 3600) / 60)}m ${up % 60}s`,
+            memory   : `${(process.memoryUsage().rss / 1024 / 1024).toFixed(1)} MB`,
+            time     : new Date().toISOString(),
+        }, null, 2));
     });
 
-    server.listen(PORT, '0.0.0.0', () => {
-        console.log(chalk.green(`   🌐 HTTP server listening on port `) + chalk.bold.white(PORT));
-        console.log(chalk.gray(`      → http://localhost:${PORT}/health\n`));
+    server.listen(PORT, () => {
+        console.log(chalk.green(`  ✅  Keep-alive server listening on port ${chalk.bold(PORT)}`));
+        console.log(chalk.gray (`      → http://localhost:${PORT}/`));
     });
 
     server.on('error', (e) => {
-        console.error(chalk.red(`   ❌ HTTP server error: ${e.message}`));
+        console.log(chalk.yellow(`  ⚠️  HTTP server error: ${e.message}`));
     });
-
-    return server;
 }
 
 /* ═══════════════════════════════════════════════════════════
- *  SESSION HANDLING
+ *  SESSION DECODER (GOTHIC MD SITE)
  * ═══════════════════════════════════════════════════════════ */
 
 function ensureSessionDir() {
     if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 }
 
-/** Decode the GOTHIC MD SITE session id (base64 → creds.json) */
 function writeSessionFromEnv() {
     const raw = (settings.SESSION_ID || '').trim();
     if (!raw) return false;
 
     let data = raw;
-    for (const p of ['GOTHIC-MD~', 'GOTHIC~', 'Gothic~', 'gothic~']) {
+    for (const p of ['GOTHIC-MD~', 'GOTHIC~', 'Gothic~', 'gothic~', 'KINGSLEY~']) {
         if (data.startsWith(p)) { data = data.slice(p.length); break; }
     }
 
     const credsPath = path.join(SESSION_DIR, 'creds.json');
 
+    // 1) Already JSON?
     if (data.trim().startsWith('{')) {
         fs.writeFileSync(credsPath, data);
         return true;
     }
 
+    // 2) Base64 encoded creds.json?
     try {
         const decoded = Buffer.from(data, 'base64').toString('utf-8');
         if (decoded.trim().startsWith('{')) {
@@ -190,21 +165,23 @@ function getBody(msg) {
 
 function getMentions(msg) {
     const m = msg.message;
-    const ctx = m?.extendedTextMessage?.contextInfo || m?.imageMessage?.contextInfo || m?.videoMessage?.contextInfo;
+    const ctx = m?.extendedTextMessage?.contextInfo
+             || m?.imageMessage?.contextInfo
+             || m?.videoMessage?.contextInfo;
     return ctx?.mentionedJid || [];
 }
 
 function getQuotedSender(msg) {
     const m = msg.message;
-    const ctx = m?.extendedTextMessage?.contextInfo || m?.imageMessage?.contextInfo;
+    const ctx = m?.extendedTextMessage?.contextInfo
+             || m?.imageMessage?.contextInfo
+             || m?.videoMessage?.contextInfo;
     return ctx?.participant || null;
 }
 
 /* ═══════════════════════════════════════════════════════════
- *  MAIN BOT
+ *  BOT START
  * ═══════════════════════════════════════════════════════════ */
-
-let prefix = settings.PREFIX;
 
 async function startBot() {
     ensureSessionDir();
@@ -213,10 +190,7 @@ async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
     const { version }          = await fetchLatestBaileysVersion();
 
-    console.log(chalk.gray(`   📡 Baileys v${version.join('.')} • Node ${process.version}\n`));
-    console.log(chalk.yellow('   🔄 Connecting to WhatsApp…'));
-
-    const sock = makeWASocket({
+    sock = makeWASocket({
         version,
         logger,
         printQRInTerminal: false,
@@ -224,38 +198,57 @@ async function startBot() {
             creds: state.creds,
             keys : makeCacheableSignalKeyStore(state.keys, logger),
         },
-        browser: ['GOTHIC-MD', 'Chrome', '121.0.0'],
+        browser: Browsers.macOS('Chrome'),
         generateHighQualityLinkPreview: true,
         syncFullHistory: false,
+        markOnlineOnConnect: true,
     });
 
-    /* ── Credentials ─────────────────────────────── */
+    /* ── Save credentials ─────────────────────── */
     sock.ev.on('creds.update', saveCreds);
 
-    /* ── Connection ──────────────────────────────── */
+    /* ── Connection lifecycle ─────────────────── */
     sock.ev.on('connection.update', async ({ connection, lastDisconnect }) => {
+
+        if (connection === 'connecting') {
+            console.log(chalk.yellow('  🔄  Connecting to WhatsApp…'));
+        }
+
         if (connection === 'open') {
-            botStatus.connected = true;
-            botStatus.user = {
-                id  : sock.user?.id,
-                name: sock.user?.name || settings.BOT_NAME,
-            };
-            printConnectedBanner(sock.user);
+            botNumber = jidNormalizedUser(sock.user.id).split('@')[0];
+
+            console.log('');
+            console.log(chalk.hex('#00FF88')('  ╔══════════════════════════════════════════════════╗'));
+            console.log(chalk.hex('#00FF88')('  ║') + chalk.bold.green('     ✅  CONNECTED TO WHATSAPP SUCCESSFULLY!     ') + chalk.hex('#00FF88')('║'));
+            console.log(chalk.hex('#00FF88')('  ╠══════════════════════════════════════════════════╣'));
+            console.log(chalk.hex('#00FF88')('  ║') + chalk.white(`     📱  Bot Number : ${chalk.bold.yellow('+' + botNumber).padEnd(22)}`) + chalk.hex('#00FF88')('║'));
+            console.log(chalk.hex('#00FF88')('  ║') + chalk.white(`     🤖  Bot Name   : ${chalk.bold.cyan(settings.BOT_NAME).padEnd(22)}`) + chalk.hex('#00FF88')('║'));
+            console.log(chalk.hex('#00FF88')('  ║') + chalk.white(`     👑  Owner      : ${chalk.bold.magenta(settings.OWNER_NAME.slice(0, 18)).padEnd(22)}`) + chalk.hex('#00FF88')('║'));
+            console.log(chalk.hex('#00FF88')('  ║') + chalk.white(`     🔣  Prefix     : ${chalk.bold.white(prefix).padEnd(22)}`) + chalk.hex('#00FF88')('║'));
+            console.log(chalk.hex('#00FF88')('  ║') + chalk.white(`     🧩  Commands   : ${chalk.bold.white(String(Object.keys(commands).length)).padEnd(22)}`) + chalk.hex('#00FF88')('║'));
+            console.log(chalk.hex('#00FF88')('  ║') + chalk.white(`     🌐  Mode       : ${chalk.bold.white(settings.MODE).padEnd(22)}`) + chalk.hex('#00FF88')('║'));
+            console.log(chalk.hex('#00FF88')('  ╚══════════════════════════════════════════════════╝'));
+            console.log('');
+            console.log(chalk.gray(`  💬  Send ${chalk.bold.white(prefix + 'menu')} in any chat to open the command menu.`));
+            console.log('');
         }
 
         if (connection === 'close') {
-            botStatus.connected = false;
             const code = lastDisconnect?.error?.output?.statusCode;
+
             if (code === DisconnectReason.loggedOut) {
-                console.log(chalk.red('\n   ❌ Logged out. Delete the session folder and paste a new Session ID.\n'));
+                console.log('');
+                console.log(chalk.red('  ❌  Logged out from WhatsApp.'));
+                console.log(chalk.yellow('  →  Delete the /session folder and paste a fresh SESSION_ID from the GOTHIC MD SITE.'));
                 process.exit(1);
             }
-            console.log(chalk.yellow('   ⚠️  Disconnected — reconnecting in 3s…'));
+
+            console.log(chalk.yellow(`  ⚠️  Connection closed (code ${code}) — reconnecting in 3s…`));
             setTimeout(startBot, 3000);
         }
     });
 
-    /* ── Anti-call ───────────────────────────────── */
+    /* ── Anti-call ───────────────────────────── */
     sock.ev.on('call', async (calls) => {
         if (!settings.REJECT_CALLS) return;
         for (const c of calls) {
@@ -265,7 +258,7 @@ async function startBot() {
         }
     });
 
-    /* ── Group welcome ───────────────────────────── */
+    /* ── Group welcome ───────────────────────── */
     sock.ev.on('group-participants.update', async (ev) => {
         if (!settings.WELCOME_MSG) return;
         if (ev.action !== 'add') return;
@@ -273,19 +266,19 @@ async function startBot() {
             const meta = await sock.groupMetadata(ev.id);
             for (const p of ev.participants) {
                 await sock.sendMessage(ev.id, {
-                    text: `👋 Welcome @${p.split('@')[0]} to *${meta.subject}*!\n\nType *${prefix}menu* to see the commands. 🎭`,
+                    text: `👋 Welcome @${p.split('@')[0]} to *${meta.subject}*!\n\nType *${prefix}menu* to see my commands. 🎭`,
                     mentions: [p],
                 });
             }
         } catch (_) {}
     });
 
-    /* ── Incoming messages ───────────────────────── */
+    /* ── Incoming messages → dispatch to commands.js ── */
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
         for (const msg of messages) {
             try { await handleMessage(sock, msg); }
-            catch (e) { console.error(chalk.red('[handler] ' + e.message)); }
+            catch (e) { console.error(chalk.red('  [handler] ' + e.message)); }
         }
     });
 
@@ -293,7 +286,7 @@ async function startBot() {
 }
 
 /* ═══════════════════════════════════════════════════════════
- *  MESSAGE HANDLER
+ *  MESSAGE HANDLER  (connects to commands.js)
  * ═══════════════════════════════════════════════════════════ */
 
 async function handleMessage(sock, msg) {
@@ -301,12 +294,13 @@ async function handleMessage(sock, msg) {
     if (msg.key.fromMe) return;
 
     const jid      = msg.key.remoteJid;
+    if (!jid) return;
     const isGroup  = jid.endsWith('@g.us');
     const sender   = isGroup ? msg.key.participant : jid;
     const pushName = msg.pushName || 'User';
     const body     = getBody(msg).trim();
 
-    /* ── Antilink check ──────────────────────────── */
+    /* ── Antilink check ─────────────────────── */
     if (isGroup && antilinkGroups.has(jid)) {
         if (/chat\.whatsapp\.com|https?:\/\//i.test(body)) {
             const meta = await sock.groupMetadata(jid);
@@ -321,34 +315,46 @@ async function handleMessage(sock, msg) {
         }
     }
 
+    /* ── Prefix check ───────────────────────── */
     if (!body.startsWith(prefix)) return;
 
     const args    = body.slice(prefix.length).trim().split(/\s+/);
     const cmdName = (args.shift() || '').toLowerCase();
     const command = commands[cmdName];
+
     if (!command) return;
 
-    if (settings.MODE === 'private' && sender.split('@')[0] !== settings.OWNER_NUMBER) return;
+    /* ── Private mode guard ─────────────────── */
+    if (settings.MODE === 'private' && sender.split('@')[0] !== settings.OWNER_NUMBER) {
+        return;
+    }
 
-    if (command.group && !isGroup) return sock.sendMessage(jid, { text: settings.MESSAGES.GROUP }, { quoted: msg });
+    /* ── Group guard ────────────────────────── */
+    if (command.group && !isGroup) {
+        return sock.sendMessage(jid, { text: settings.MESSAGES.GROUP }, { quoted: msg });
+    }
 
-    if (command.admin || command.botAdmin) {
+    /* ── Admin / bot-admin guards ───────────── */
+    if ((command.admin || command.botAdmin) && isGroup) {
         const meta    = await sock.groupMetadata(jid);
         const me      = jidNormalizedUser(sock.user.id);
         const isAdmin = meta.participants.find(p => p.id === sender)?.admin;
         const botAdm  = meta.participants.find(p => p.id === me)?.admin;
 
-        if (command.admin && !isAdmin)   return sock.sendMessage(jid, { text: settings.MESSAGES.ADMIN }, { quoted: msg });
+        if (command.admin   && !isAdmin) return sock.sendMessage(jid, { text: settings.MESSAGES.ADMIN }, { quoted: msg });
         if (command.botAdmin && !botAdm) return sock.sendMessage(jid, { text: '🛡️ *Make me an admin first.*' }, { quoted: msg });
     }
 
+    /* ── Owner guard ────────────────────────── */
     if (command.owner && sender.split('@')[0] !== settings.OWNER_NUMBER) {
         return sock.sendMessage(jid, { text: settings.MESSAGES.OWNER }, { quoted: msg });
     }
 
+    /* ── Read + typing presence ─────────────── */
     if (settings.AUTO_READ)   await sock.readMessages([msg.key]).catch(() => {});
     if (settings.AUTO_TYPING) await sock.sendPresenceUpdate('composing', jid).catch(() => {});
 
+    /* ── Build context & run the command ────── */
     const ctx = {
         sock, msg, jid, sender, pushName,
         args, body, command: cmdName, prefix,
@@ -362,7 +368,7 @@ async function handleMessage(sock, msg) {
     try {
         await command.handler(ctx);
     } catch (e) {
-        console.error(chalk.red(`[${cmdName}] ` + e.message));
+        console.error(chalk.red(`  [${cmdName}] ${e.message}`));
         await ctx.reply(settings.MESSAGES.ERROR);
     } finally {
         if (settings.AUTO_TYPING) await sock.sendPresenceUpdate('paused', jid).catch(() => {});
@@ -373,23 +379,24 @@ async function handleMessage(sock, msg) {
  *  BOOTSTRAP
  * ═══════════════════════════════════════════════════════════ */
 
-process.on('uncaughtException',  (e) => console.error(chalk.red('[uncaught] ' + e.message)));
-process.on('unhandledRejection', (e) => console.error(chalk.red('[unhandled] ' + (e?.message || e))));
+process.on('uncaughtException',  (e) => console.error(chalk.red('  [uncaught] '  + (e?.message || e))));
+process.on('unhandledRejection', (e) => console.error(chalk.red('  [unhandled] ' + (e?.message || e))));
 
 (async () => {
-    printStartupBanner();
-
-    /* Start the HTTP server FIRST so Render sees the port open */
-    startHttpServer();
+    printLogo();
 
     if (!settings.SESSION_ID || !settings.SESSION_ID.trim()) {
-        console.log(chalk.red('\n❌  SESSION_ID is empty.'));
-        console.log(chalk.yellow('   1. Get your session id from the GOTHIC MD SITE'));
-        console.log(chalk.yellow('   2. Paste it into settings.js  (SESSION_ID field)'));
-        console.log(chalk.yellow('   3. Or set the SESSION_ID environment variable on Render.\n'));
-        console.log(chalk.gray('   (HTTP server is still running on port ' + PORT + ' for health checks.)\n'));
-        return;
+        console.log(chalk.red('  ❌  SESSION_ID is empty.\n'));
+        console.log(chalk.yellow('     1. Get your session id from the GOTHIC MD SITE'));
+        console.log(chalk.yellow('     2. Paste it into settings.js  (SESSION_ID field)'));
+        console.log(chalk.yellow('     3. Or set the SESSION_ID environment variable on Render.\n'));
+        process.exit(1);
     }
+
+    startKeepAliveServer();
+
+    console.log(chalk.cyan(`  🧩  Loaded ${chalk.bold(Object.keys(commands).length)} commands from commands.js`));
+    console.log(chalk.gray (`      ${Object.keys(commands).join(', ')}\n`));
 
     await startBot();
 })();
